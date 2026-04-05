@@ -1,0 +1,251 @@
+--[[ Credits
+    Matas#3535 @matas - Created UI
+    bored#9316 @wally hub user - Helped make library
+]]
+-- // Variables
+local ws = game:GetService("Workspace")
+local uis = game:GetService("UserInputService")
+local rs = game:GetService("RunService")
+local hs = game:GetService("HttpService")
+local plrs = game:GetService("Players")
+local stats = game:GetService("Stats")
+local marketplace = game:GetService("MarketplaceService")
+
+-- UI Variables
+local library = {
+    drawings = {},
+    hidden = {},
+    connections = {},
+    pointers = {},
+    began = {},
+    changed = {},
+    ended = {},
+    colors = {},
+    folders = {
+        main = "ZeeBot",
+        assets = "ZeeBot/assets",
+        configs = "ZeeBot/configs"
+    },
+    shared = {
+        initialized = false,
+        fps = 0,
+        ping = 0
+    }
+}
+
+-- Create folders safely
+for i,v in pairs(library.folders) do
+    if makefolder then makefolder(v) end
+end
+
+local utility = {}
+local pages = {}
+local sections = {}
+local theme = {
+    accent = Color3.fromRGB(55, 175, 225),
+    lightcontrast = Color3.fromRGB(30, 30, 30),
+    darkcontrast = Color3.fromRGB(25, 25, 25),
+    outline = Color3.fromRGB(0, 0, 0),
+    inline = Color3.fromRGB(50, 50, 50),
+    textcolor = Color3.fromRGB(255, 255, 255),
+    textborder = Color3.fromRGB(0, 0, 0),
+    cursoroutline = Color3.fromRGB(10, 10, 10),
+    font = 3, -- Drawing.Fonts.Plex (Numeric fallback)
+    textsize = 13
+}
+
+-- // Utility Functions
+do
+    function utility:Size(xScale, xOffset, yScale, yOffset, instance)
+        if instance then
+            local x = xScale * instance.Size.x + xOffset
+            local y = yScale * instance.Size.y + yOffset
+            return Vector2.new(x, y)
+        else
+            local vx, vy = ws.CurrentCamera.ViewportSize.x, ws.CurrentCamera.ViewportSize.y
+            return Vector2.new(xScale * vx + xOffset, yScale * vy + yOffset)
+        end
+    end
+
+    function utility:Position(xScale, xOffset, yScale, yOffset, instance)
+        if instance then
+            local x = instance.Position.x + (xScale * instance.Size.x) + xOffset
+            local y = instance.Position.y + (yScale * instance.Size.y) + yOffset
+            return Vector2.new(x, y)
+        else
+            local vx, vy = ws.CurrentCamera.ViewportSize.x, ws.CurrentCamera.ViewportSize.y
+            return Vector2.new(xScale * vx + xOffset, yScale * vy + yOffset)
+        end
+    end
+
+    function utility:Create(instanceType, instanceOffset, instanceProperties, instanceParent)
+        local instance = nil
+        local instanceType = instanceType:lower()
+        
+        if instanceType == "frame" then
+            instance = Drawing.new("Square")
+            instance.Filled = true
+            instance.Thickness = 0
+        elseif instanceType == "textlabel" then
+            instance = Drawing.new("Text")
+            instance.Outline = true
+            instance.Center = false
+        elseif instanceType == "image" then
+            instance = Drawing.new("Image")
+        end
+
+        if instance then
+            instance.Visible = true
+            instance.Transparency = 1
+            instance.ZIndex = 1000
+            
+            for i, v in pairs(instanceProperties) do
+                if i ~= "Hidden" then
+                    instance[i] = v
+                end
+            end
+
+            local isHidden = instanceProperties.Hidden or false
+            if not isHidden then
+                table.insert(library.drawings, {instance, instanceOffset, instance.Transparency})
+            else
+                table.insert(library.hidden, {instance, instanceOffset, instance.Transparency})
+            end
+
+            if instanceParent then
+                table.insert(instanceParent, instance)
+            end
+            return instance
+        end
+    end
+
+    function utility:GetTextBounds(text, textSize, font)
+        local textlabel = Drawing.new("Text")
+        textlabel.Text = text
+        textlabel.Size = textSize
+        textlabel.Font = font
+        local bounds = textlabel.TextBounds
+        textlabel:Remove()
+        return bounds
+    end
+
+    function utility:Connection(connectionType, callback)
+        local connection = connectionType:Connect(callback)
+        table.insert(library.connections, connection)
+        return connection
+    end
+end
+
+-- // Library Core
+do
+    library.__index = library
+
+    function library:New(info)
+        local info = info or {}
+        local name = info.name or "UI Title"
+        local size = info.size or Vector2.new(504, 604)
+        theme.accent = info.accent or theme.accent
+
+        local window = {pages = {}, isVisible = true}
+
+        -- Main Background
+        local main_frame = utility:Create("Frame", {Vector2.new(0,0)}, {
+            Size = size,
+            Position = utility:Position(0.5, -(size.X/2), 0.5, -(size.Y/2)),
+            Color = theme.outline
+        })
+        
+        local inner_frame = utility:Create("Frame", {Vector2.new(2,2), main_frame}, {
+            Size = utility:Size(1, -4, 1, -4, main_frame),
+            Position = utility:Position(0, 2, 0, 2, main_frame),
+            Color = theme.lightcontrast
+        })
+
+        local title = utility:Create("TextLabel", {Vector2.new(10, 5), inner_frame}, {
+            Text = name,
+            Size = theme.textsize + 2,
+            Font = theme.font,
+            Color = theme.textcolor,
+            Position = utility:Position(0, 10, 0, 5, inner_frame)
+        })
+
+        -- Watermark Function
+        function window:Watermark(info)
+            local wm = {visible = true}
+            local gameName = "Unknown Game"
+            pcall(function() gameName = marketplace:GetProductInfo(game.PlaceId).Name end)
+
+            local wm_outline = utility:Create("Frame", {Vector2.new(20, 20)}, {
+                Size = Vector2.new(200, 25),
+                Position = Vector2.new(20, 20),
+                Color = theme.outline
+            })
+            
+            local wm_text = utility:Create("TextLabel", {Vector2.new(5, 5), wm_outline}, {
+                Text = "ZeeBot | 0 FPS | 0 MS",
+                Size = theme.textsize,
+                Font = theme.font,
+                Color = theme.textcolor,
+                Position = utility:Position(0, 5, 0, 5, wm_outline)
+            })
+
+            -- Logic for FPS/Ping
+            task.spawn(function()
+                local lastIteration = tick()
+                local frameCount = 0
+                utility:Connection(rs.RenderStepped, function()
+                    frameCount += 1
+                    if (tick() - lastIteration) >= 1 then
+                        local fps = frameCount
+                        local ping = stats.Network.ServerStatsItem["Data Ping"]:GetValueString():split(" ")[1] or "0"
+                        wm_text.Text = string.format("ZeeBot | %s | FPS: %d | Ping: %sms", gameName, fps, ping)
+                        
+                        -- Update size based on text
+                        local b = wm_text.TextBounds
+                        wm_outline.Size = Vector2.new(b.X + 15, 25)
+                        
+                        frameCount = 0
+                        lastIteration = tick()
+                    end
+                end)
+            end)
+            return wm
+        end
+
+        -- Notifications logic (The part that was missing)
+        function window:Notification(info)
+            local text = info.text or "Notification"
+            local duration = info.duration or 5
+            
+            local n_outline = utility:Create("Frame", {Vector2.new(20, 50)}, {
+                Size = Vector2.new(250, 30),
+                Position = Vector2.new(-300, 50), -- Start offscreen
+                Color = theme.outline
+            })
+            
+            local n_text = utility:Create("TextLabel", {Vector2.new(10, 7), n_outline}, {
+                Text = text,
+                Size = theme.textsize,
+                Font = theme.font,
+                Color = theme.textcolor,
+                Position = utility:Position(0, 10, 0, 7, n_outline)
+            })
+
+            -- Basic animation slide-in
+            task.spawn(function()
+                for i = 1, 30 do
+                    n_outline.Position = Vector2.new(-300 + (i * 11), 50)
+                    task.wait()
+                end
+                task.wait(duration)
+                n_outline.Visible = false
+                n_text:Remove()
+                n_outline:Remove()
+            end)
+        end
+
+        return window
+    end
+end
+
+return library
